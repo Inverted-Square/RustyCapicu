@@ -6,7 +6,12 @@ use crate::board::Turn::*;
 mod board;
 
 fn main() {
-    let board1 = BoardBuilder::new().build();
-    let board2 = BoardBuilder::new().starting_player(Player1, GivenIdx(Second)).build();
-    let board3 = BoardBuilder::new().starting_player(Player3, HumanInput);
+    for board in BoardBuilder::new().build_all(Player3) {
+        println!("{board}");
+    }
+
+    let board = BoardBuilder::new()
+        .starting_player(Player3, GivenIdx(Forth))
+        .build();
+    println!("{board}{board:?}");
 }

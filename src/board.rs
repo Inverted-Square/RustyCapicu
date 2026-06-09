@@ -1,23 +1,27 @@
 use crate::board::BoardInitialSettings::*;
+use crate::board::DominoIdx::*;
 use crate::board::FirstDominoChoice::*;
 use crate::board::Turn::*;
+use std::fmt::{Display, Formatter};
 
+#[derive(Clone)]
 pub struct BoardBuilder {
     dominoes: [[u8; 2]; 28],
     settings: BoardInitialSettings,
 }
 
+#[derive(Clone)]
 enum BoardInitialSettings {
     FirstRound,
     StartingPlayer(Turn, FirstDominoChoice),
 }
 
+#[derive(Clone)]
 pub enum FirstDominoChoice {
     HumanInput,
     GivenIdx(DominoIdx),
 }
 
-// TODO: Consider the new type idiom here.
 #[derive(Clone, Copy)]
 pub enum DominoIdx {
     First,
@@ -73,6 +77,17 @@ impl BoardBuilder {
     pub fn starting_player(mut self, turn: Turn, choice: FirstDominoChoice) -> Self {
         self.settings = StartingPlayer(turn, choice);
         self
+    }
+
+    pub fn build_all(self, turn: Turn) -> Vec<Board> {
+        vec![First, Second, Third, Forth, Fifth, Sixth, Seventh]
+            .into_iter()
+            .map(|domino_idx| {
+                self.clone()
+                    .starting_player(turn.clone(), GivenIdx(domino_idx))
+                    .build()
+            })
+            .collect()
     }
 
     pub fn build(self) -> Board {
@@ -134,12 +149,51 @@ pub struct Board {
 impl Board {
     fn new() -> Self {
         Self {
-            hands: vec![(0..7).map(|_| Vec::with_capacity(7)).collect::<_>(); 4],
+            hands: vec![(0..7).map(|_| Vec::with_capacity(7)).collect(); 4],
             pip_totals: [0; 4],
             train_ends: [u8::MAX; 2],
             turn: Player1,
             eval: 0,
         }
+    }
+
+    fn hands_to_string(&self) -> String {
+        let mut board_string = String::from("");
+
+        for (player, hand) in self.hands.iter().enumerate() {
+            board_string.push_str(&format!("\nPlayer {}'s hand:   ", player + 1));
+            for (num1, row) in hand.iter().enumerate() {
+                board_string.push_str(&Self::dominoes_to_string(num1 as u8, row));
+            }
+        }
+
+        board_string
+    }
+
+    fn dominoes_to_string(num1: u8, row: &[u8]) -> String {
+        let mut dominoes_string = String::from("");
+
+        for &num2 in row {
+            if num1 <= num2 {
+                dominoes_string.push_str(&format!("|| {num1} | {num2} ||   "));
+            }
+        }
+
+        dominoes_string
+    }
+}
+
+impl Display for Board {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}\nPip totals: {:?}\nTrain ends: {:?}\nTurn: {:?}\nEval: {}\n",
+            self.hands_to_string(),
+            self.pip_totals,
+            self.train_ends,
+            self.turn,
+            self.eval,
+        )
     }
 }
 
