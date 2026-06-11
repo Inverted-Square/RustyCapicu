@@ -96,7 +96,7 @@ impl BoardBuilder {
         for (idx, &[num1, num2]) in self.dominoes.iter().enumerate() {
             if Self::place_first(&self.settings, idx, num1, num2) {
                 board.train_ends = [num1, num2];
-                board.turn = Self::idx_as_turn((idx / 7 + 1) % 4);
+                board.turn = Self::idx_as_turn(idx / 7);
                 continue;
             }
 
@@ -109,8 +109,10 @@ impl BoardBuilder {
         }
 
         if let StartingPlayer(turn, HumanInput) = self.settings {
-            todo!("Get the human's first move, play that move, and make sure to progress the turn.")
+            todo!("Get the human's first move, play that move.")
         }
+
+        let _ = board.set_next_turn();
 
         board
     }
@@ -155,6 +157,82 @@ impl Board {
             turn: Player1,
             eval: 0,
         }
+    }
+
+    pub fn get_all_moves(&self) -> Vec<Self> {
+        let mut new_boards = Vec::with_capacity(7);
+        let [train_end1, train_end2] = self.train_ends;
+
+        self.add_moves_at(train_end1, 0, &mut new_boards);
+        if train_end1 == train_end2 {
+            new_boards
+        } else {
+            self.add_moves_at(train_end2, 1, &mut new_boards);
+            new_boards
+        }
+    }
+
+    fn add_moves_at(&self, train_end: u8, train_idx: usize, new_boards: &mut Vec<Self>) {
+        let player = self.turn.clone() as usize;
+        for (num2_idx, &num2) in self.hands[player][train_end as usize].iter().enumerate() {
+            let mut new_board = self.clone();
+            new_board.play_domino(player, train_end, num2_idx, train_idx);
+            new_board.evaluate(player, train_end, num2);
+            new_boards.push(new_board);
+        }
+    }
+
+    fn play_domino(&mut self, player: usize, num1: u8, num2_idx: usize, train_idx: usize) {
+        let num2 = self.hands[player][num1 as usize].swap_remove(num2_idx);
+        self.pip_totals[player] -= num1 + num2;
+        self.train_ends[train_idx] = num2;
+
+        if num1 == num2 {
+            return;
+        }
+
+        let other_row = &mut self.hands[player][num2 as usize];
+        let num1_idx = other_row.iter().position(|&value| value == num1).unwrap();
+        let _ = other_row.swap_remove(num1_idx);
+    }
+
+    fn evaluate(&mut self, player: usize, num1: u8, num2: u8) {
+        if self.pip_totals[player] == 0 {
+            self.eval = self.pip_totals.iter().sum::<u8>() as i16;
+            self.eval += 25 * (self.train_ends[0] == self.train_ends[1] && num1 != num2) as i16;
+            if player % 2 == 1 {
+                self.eval *= -1;
+            }
+
+            return;
+        }
+
+        if self.set_next_turn() {
+            return;
+        }
+
+        self.eval = self.pip_totals.iter().sum::<u8>() as i16;
+        let curr_pip_total = self.pip_totals[player];
+        let next_pip_total = self.pip_totals[self.turn.clone() as usize];
+        let curr_wins = curr_pip_total <= next_pip_total;
+        let curr_team2 = player % 2 == 1;
+        if curr_wins && curr_team2 || !curr_wins && !curr_team2 {
+            self.eval *= -1;
+        }
+    }
+
+    pub fn set_next_turn(&mut self) -> bool {
+        for _ in 0..4 {
+            self.turn.next_player();
+            let player = self.turn.clone() as usize;
+            let hand = &self.hands[player];
+            let [train_end1, train_end2] = self.train_ends;
+            if !(hand[train_end1 as usize].is_empty() && hand[train_end2 as usize].is_empty()) {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn hands_to_string(&self) -> String {

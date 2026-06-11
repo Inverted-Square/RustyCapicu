@@ -14,4 +14,8 @@ fn main() {
         .starting_player(Player3, GivenIdx(Forth))
         .build();
     println!("{board}{board:?}");
+
+    for played_move in board.get_all_moves() {
+        println!("{played_move}");
+    }
 }
