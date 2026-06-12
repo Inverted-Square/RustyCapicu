@@ -1,7 +1,8 @@
 use crate::board::BoardInitialSettings::*;
-use crate::board::DominoIdx::*;
 use crate::board::FirstDominoChoice::*;
-use crate::board::Turn::*;
+use crate::game::PlayerType;
+use crate::game::PlayerType::*;
+use crate::solver::find_best_in;
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone)]
@@ -13,24 +14,20 @@ pub struct BoardBuilder {
 #[derive(Clone)]
 enum BoardInitialSettings {
     FirstRound,
-    StartingPlayer(Turn, FirstDominoChoice),
-}
-
-#[derive(Clone)]
-pub enum FirstDominoChoice {
-    HumanInput,
-    GivenIdx(DominoIdx),
+    StartingPlayer(usize, FirstDominoChoice),
 }
 
 #[derive(Clone, Copy)]
-pub enum DominoIdx {
-    First,
-    Second,
-    Third,
-    Forth,
-    Fifth,
-    Sixth,
-    Seventh,
+enum FirstDominoChoice {
+    HumanInput,
+    GivenIdx(Option<usize>),
+}
+
+pub enum Turn {
+    Player1,
+    Player2,
+    Player3,
+    Player4,
 }
 
 impl BoardBuilder {
@@ -74,29 +71,46 @@ impl BoardBuilder {
         }
     }
 
-    pub fn starting_player(mut self, turn: Turn, choice: FirstDominoChoice) -> Self {
-        self.settings = StartingPlayer(turn, choice);
+    pub fn starting_player(mut self, turn: Turn, player_type: PlayerType) -> Self {
+        match player_type {
+            Human => self.settings = StartingPlayer(turn as usize, HumanInput),
+            UnfairBot => self.settings = StartingPlayer(turn as usize, GivenIdx(None)),
+        }
+
         self
     }
 
-    pub fn build_all(self, turn: Turn) -> Vec<Board> {
-        vec![First, Second, Third, Forth, Fifth, Sixth, Seventh]
-            .into_iter()
-            .map(|domino_idx| {
-                self.clone()
-                    .starting_player(turn.clone(), GivenIdx(domino_idx))
-                    .build()
-            })
-            .collect()
+    fn build_best(self, turn: usize) -> Board {
+        let boards = (0..7)
+            .map(|domino_idx| self.clone().set_given_idx(turn, domino_idx).build_helper())
+            .collect::<Vec<_>>();
+
+        let is_team1 = turn.is_multiple_of(2);
+        let (board, eval) = find_best_in(&boards, is_team1).unwrap();
+        print!("\nChosen board's eval: {eval}");
+        board.clone()
+    }
+
+    fn set_given_idx(mut self, turn: usize, domino_idx: usize) -> Self {
+        self.settings = StartingPlayer(turn, GivenIdx(Some(domino_idx)));
+        self
     }
 
     pub fn build(self) -> Board {
+        if let StartingPlayer(turn, GivenIdx(None)) = self.settings {
+            self.build_best(turn)
+        } else {
+            self.build_helper()
+        }
+    }
+
+    fn build_helper(self) -> Board {
         let mut board = Board::new();
 
         for (idx, &[num1, num2]) in self.dominoes.iter().enumerate() {
             if Self::place_first(&self.settings, idx, num1, num2) {
                 board.train_ends = [num1, num2];
-                board.turn = Self::idx_as_turn(idx / 7);
+                board.turn = idx / 7;
                 continue;
             }
 
@@ -115,21 +129,11 @@ impl BoardBuilder {
     fn place_first(settings: &BoardInitialSettings, idx: usize, num1: u8, num2: u8) -> bool {
         match settings {
             FirstRound => num1 == 6 && num2 == 6,
-            StartingPlayer(turn, choice) if turn.clone() as usize == idx / 7 => match choice {
+            &StartingPlayer(turn, choice) if turn == idx / 7 => match choice {
                 HumanInput => false,
-                GivenIdx(domino_idx) => *domino_idx as usize == idx % 7,
+                GivenIdx(domino_idx) => domino_idx.unwrap() == idx % 7,
             },
             _ => false,
-        }
-    }
-
-    fn idx_as_turn(idx: usize) -> Turn {
-        match idx {
-            0 => Player1,
-            1 => Player2,
-            2 => Player3,
-            3 => Player4,
-            _ => unreachable!(),
         }
     }
 }
@@ -139,7 +143,7 @@ pub struct Board {
     hands: Vec<Vec<Vec<u8>>>,
     pip_totals: [u8; 4],
     train_ends: [u8; 2],
-    turn: Turn,
+    turn: usize,
     eval: i16,
 }
 
@@ -149,7 +153,7 @@ impl Board {
             hands: vec![(0..7).map(|_| Vec::with_capacity(7)).collect(); 4],
             pip_totals: [0; 4],
             train_ends: [u8::MAX; 2],
-            turn: Player1,
+            turn: 0,
             eval: 0,
         }
     }
@@ -162,18 +166,13 @@ impl Board {
 
         self.pip_totals[player] += num1 + num2;
     }
-    
+
     pub fn eval(&self) -> i16 {
         self.eval
     }
 
     pub fn is_team1(&self) -> bool {
-        match self.turn {
-            Player1 => true,
-            Player2 => false,
-            Player3 => true,
-            Player4 => false,
-        }
+        self.turn.is_multiple_of(2)
     }
 
     pub fn get_all_moves(&self) -> Vec<Self> {
@@ -190,11 +189,10 @@ impl Board {
     }
 
     fn add_moves_at(&self, train_end: u8, train_idx: usize, new_boards: &mut Vec<Self>) {
-        let player = self.turn.clone() as usize;
-        for (num2_idx, &num2) in self.hands[player][train_end as usize].iter().enumerate() {
+        for (num2_idx, &num2) in self.hands[self.turn][train_end as usize].iter().enumerate() {
             let mut new_board = self.clone();
-            new_board.play_domino(player, train_end, num2_idx, train_idx);
-            new_board.evaluate(player, train_end, num2);
+            new_board.play_domino(self.turn, train_end, num2_idx, train_idx);
+            new_board.evaluate(self.turn, train_end, num2);
             new_boards.push(new_board);
         }
     }
@@ -240,9 +238,8 @@ impl Board {
 
     fn set_next_turn(&mut self) -> bool {
         for _ in 0..4 {
-            self.turn.next_player();
-            let player = self.turn.clone() as usize;
-            let hand = &self.hands[player];
+            self.turn = (self.turn + 1) % 4;
+            let hand = &self.hands[self.turn];
             let [train_end1, train_end2] = self.train_ends;
             if !(hand[train_end1 as usize].is_empty() && hand[train_end2 as usize].is_empty()) {
                 return true;
@@ -292,29 +289,9 @@ impl Display for Board {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Turn {
-    Player1,
-    Player2,
-    Player3,
-    Player4,
-}
-
-impl Turn {
-    pub fn next_player(&mut self) {
-        *self = match self {
-            Player1 => Player2,
-            Player2 => Player3,
-            Player3 => Player4,
-            Player4 => Player1,
-        };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::board::Board;
-    use crate::board::Turn::*;
 
     #[test]
     fn team1_runs_out_first() {
@@ -325,7 +302,7 @@ mod tests {
         board.add_domino_to(3, 6, 6);
         board.add_domino_to(3, 2, 4);
         board.train_ends = [2, 2];
-        board.turn = Player3;
+        board.turn = 2;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -335,7 +312,7 @@ mod tests {
         expected_board.add_domino_to(3, 6, 6);
         expected_board.add_domino_to(3, 2, 4);
         expected_board.train_ends = [6, 2];
-        expected_board.turn = Player3;
+        expected_board.turn = 2;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
 
         assert_eq!(boards[0], expected_board);
@@ -350,7 +327,7 @@ mod tests {
         board.add_domino_to(3, 6, 6);
         board.add_domino_to(3, 2, 4);
         board.train_ends = [3, 5];
-        board.turn = Player2;
+        board.turn = 1;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -360,7 +337,7 @@ mod tests {
         expected_board.add_domino_to(3, 6, 6);
         expected_board.add_domino_to(3, 2, 4);
         expected_board.train_ends = [3, 5];
-        expected_board.turn = Player2;
+        expected_board.turn = 1;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
 
         assert_eq!(boards[0], expected_board);
@@ -375,7 +352,7 @@ mod tests {
         board.add_domino_to(3, 6, 6);
         board.add_domino_to(3, 2, 4);
         board.train_ends = [3, 1];
-        board.turn = Player1;
+        board.turn = 0;
         let boards = board.get_all_moves();
 
         let mut expected_board1 = Board::new();
@@ -384,7 +361,7 @@ mod tests {
         expected_board1.add_domino_to(3, 6, 6);
         expected_board1.add_domino_to(3, 2, 4);
         expected_board1.train_ends = [1, 1];
-        expected_board1.turn = Player1;
+        expected_board1.turn = 0;
         expected_board1.eval = (expected_board1.pip_totals.iter().sum::<u8>() + 25) as i16;
 
         let mut expected_board2 = expected_board1.clone();
@@ -406,7 +383,7 @@ mod tests {
         board.add_domino_to(3, 0, 3);
         board.add_domino_to(3, 1, 2);
         board.train_ends = [1, 6];
-        board.turn = Player2;
+        board.turn = 1;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -420,7 +397,7 @@ mod tests {
         expected_board.add_domino_to(3, 0, 3);
         expected_board.add_domino_to(3, 1, 2);
         expected_board.train_ends = [1, 0];
-        expected_board.turn = Player3;
+        expected_board.turn = 2;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -434,7 +411,7 @@ mod tests {
         board.add_domino_to(2, 2, 5);
         board.add_domino_to(3, 0, 5);
         board.train_ends = [4, 4];
-        board.turn = Player1;
+        board.turn = 0;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -444,7 +421,7 @@ mod tests {
         expected_board.add_domino_to(2, 2, 5);
         expected_board.add_domino_to(3, 0, 5);
         expected_board.train_ends = [3, 4];
-        expected_board.turn = Player1;
+        expected_board.turn = 0;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
 
         assert_eq!(boards[0], expected_board);
@@ -459,7 +436,7 @@ mod tests {
         board.add_domino_to(2, 3, 4);
         board.add_domino_to(3, 0, 5);
         board.train_ends = [4, 4];
-        board.turn = Player3;
+        board.turn = 2;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -469,7 +446,7 @@ mod tests {
         expected_board.add_domino_to(2, 2, 5);
         expected_board.add_domino_to(3, 0, 5);
         expected_board.train_ends = [3, 4];
-        expected_board.turn = Player3;
+        expected_board.turn = 2;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
 
         assert_eq!(boards[0], expected_board);
@@ -484,7 +461,7 @@ mod tests {
         board.add_domino_to(2, 2, 5);
         board.add_domino_to(3, 0, 5);
         board.train_ends = [4, 4];
-        board.turn = Player2;
+        board.turn = 1;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -494,7 +471,7 @@ mod tests {
         expected_board.add_domino_to(2, 2, 5);
         expected_board.add_domino_to(3, 0, 5);
         expected_board.train_ends = [3, 4];
-        expected_board.turn = Player2;
+        expected_board.turn = 1;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
 
         assert_eq!(boards[0], expected_board);
@@ -509,7 +486,7 @@ mod tests {
         board.add_domino_to(3, 0, 5);
         board.add_domino_to(3, 3, 4);
         board.train_ends = [4, 4];
-        board.turn = Player4;
+        board.turn = 3;
         let boards = board.get_all_moves();
         assert_eq!(boards.len(), 1);
 
@@ -519,7 +496,7 @@ mod tests {
         expected_board.add_domino_to(2, 2, 5);
         expected_board.add_domino_to(3, 0, 5);
         expected_board.train_ends = [3, 4];
-        expected_board.turn = Player4;
+        expected_board.turn = 3;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
 
         assert_eq!(boards[0], expected_board);

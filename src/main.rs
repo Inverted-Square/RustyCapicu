@@ -1,14 +1,15 @@
 use crate::board::BoardBuilder;
-use crate::board::DominoIdx::*;
-use crate::board::FirstDominoChoice::*;
 use crate::board::Turn::*;
-use crate::solver::*;
+use crate::game::PlayerType::UnfairBot;
+use crate::solver::{best_final_eval, find_best_move};
 
 mod board;
+mod game;
 mod solver;
 
 fn main() {
     random_perfect_first_round();
+    println!("-------------------------------------------");
     random_perfect_round();
 }
 
@@ -22,11 +23,10 @@ fn random_perfect_first_round() {
 }
 
 fn random_perfect_round() {
-    let boards = BoardBuilder::new().build_all(Player1);
-    let (board, eval) = find_best_in(&boards, true).unwrap();
-    println!("{board}\nMinimax eval: {eval}");
-
-    let mut board = board.clone();
+    let mut board = BoardBuilder::new()
+        .starting_player(Player1, UnfairBot)
+        .build();
+    println!("{board}");
     while let Some((best_board, eval)) = find_best_move(&board) {
         println!("{best_board}\nMinimax eval: {eval}");
         board = best_board;
