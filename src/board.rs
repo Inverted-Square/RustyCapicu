@@ -162,6 +162,19 @@ impl Board {
 
         self.pip_totals[player] += num1 + num2;
     }
+    
+    pub fn eval(&self) -> i16 {
+        self.eval
+    }
+
+    pub fn is_team1(&self) -> bool {
+        match self.turn {
+            Player1 => true,
+            Player2 => false,
+            Player3 => true,
+            Player4 => false,
+        }
+    }
 
     pub fn get_all_moves(&self) -> Vec<Self> {
         let mut new_boards = Vec::with_capacity(7);
@@ -201,7 +214,7 @@ impl Board {
     }
 
     fn evaluate(&mut self, player: usize, num1: u8, num2: u8) {
-        if self.pip_totals[player] == 0 {
+        if self.pip_totals[player] == 0 && self.hands[player][0].is_empty() {
             self.eval = self.pip_totals.iter().sum::<u8>() as i16;
             self.eval += 25 * (self.train_ends[0] == self.train_ends[1] && num1 != num2) as i16;
             if player % 2 == 1 {
@@ -378,6 +391,38 @@ mod tests {
         expected_board2.train_ends = [3, 3];
 
         assert_eq!(boards, [expected_board1, expected_board2]);
+    }
+
+    #[test]
+    fn game_continues_when_double_0_is_last() {
+        let mut board = Board::new();
+        board.add_domino_to(0, 2, 4);
+        board.add_domino_to(0, 2, 3);
+        board.add_domino_to(0, 2, 2);
+        board.add_domino_to(1, 0, 0);
+        board.add_domino_to(1, 0, 6);
+        board.add_domino_to(2, 0, 2);
+        board.add_domino_to(2, 0, 4);
+        board.add_domino_to(3, 0, 3);
+        board.add_domino_to(3, 1, 2);
+        board.train_ends = [1, 6];
+        board.turn = Player2;
+        let boards = board.get_all_moves();
+        assert_eq!(boards.len(), 1);
+
+        let mut expected_board = Board::new();
+        expected_board.add_domino_to(0, 2, 4);
+        expected_board.add_domino_to(0, 2, 3);
+        expected_board.add_domino_to(0, 2, 2);
+        expected_board.add_domino_to(1, 0, 0);
+        expected_board.add_domino_to(2, 0, 2);
+        expected_board.add_domino_to(2, 0, 4);
+        expected_board.add_domino_to(3, 0, 3);
+        expected_board.add_domino_to(3, 1, 2);
+        expected_board.train_ends = [1, 0];
+        expected_board.turn = Player3;
+
+        assert_eq!(boards[0], expected_board);
     }
 
     #[test]
