@@ -1,9 +1,9 @@
-use crate::board::BoardInitialSettings::*;
-use crate::board::FirstDominoChoice::*;
 use crate::game::PlayerType;
 use crate::game::PlayerType::*;
 use crate::solver::find_best_in;
 use std::fmt::{Display, Formatter};
+use BoardInitialSettings::*;
+use FirstDominoChoice::*;
 
 #[derive(Clone)]
 pub struct BoardBuilder {
@@ -23,6 +23,7 @@ enum FirstDominoChoice {
     GivenIdx(Option<usize>),
 }
 
+#[derive(Debug)]
 pub enum Turn {
     Player1,
     Player2,
@@ -111,6 +112,7 @@ impl BoardBuilder {
             if Self::place_first(&self.settings, idx, num1, num2) {
                 board.train_ends = [num1, num2];
                 board.turn = idx / 7;
+                board.last_played_domino = [num1, num2];
                 continue;
             }
 
@@ -118,7 +120,10 @@ impl BoardBuilder {
         }
 
         if let StartingPlayer(turn, HumanInput) = self.settings {
-            todo!("Get the human's first move, play that move.")
+            todo!(
+                "Get the human's first move, play that move. \
+                 Remember to set train_ends, turn and last_played_domino."
+            )
         }
 
         let _ = board.set_next_turn();
@@ -145,6 +150,7 @@ pub struct Board {
     train_ends: [u8; 2],
     turn: usize,
     eval: i16,
+    last_played_domino: [u8; 2],
 }
 
 impl Board {
@@ -155,6 +161,7 @@ impl Board {
             train_ends: [u8::MAX; 2],
             turn: 0,
             eval: 0,
+            last_played_domino: [u8::MAX; 2],
         }
     }
 
@@ -169,6 +176,10 @@ impl Board {
 
     pub fn eval(&self) -> i16 {
         self.eval
+    }
+
+    pub fn last_played_domino(&self) -> [u8; 2] {
+        self.last_played_domino
     }
 
     pub fn is_team1(&self) -> bool {
@@ -209,6 +220,8 @@ impl Board {
         let other_row = &mut self.hands[player][num2 as usize];
         let num1_idx = other_row.iter().position(|&value| value == num1).unwrap();
         let _ = other_row.swap_remove(num1_idx);
+
+        self.last_played_domino = [num1, num2];
     }
 
     fn evaluate(&mut self, player: usize, num1: u8, num2: u8) {
