@@ -6,6 +6,7 @@ use crate::solver::{best_final_eval, find_best_move};
 mod board;
 mod game;
 mod solver;
+mod train_displayer;
 
 fn main() {
     random_perfect_first_round();
