@@ -1,12 +1,6 @@
 use crate::board::Board;
 use std::cmp::{max, min};
 
-pub fn find_best_move(board: &Board) -> Option<(Board, i16)> {
-    let boards = board.get_all_moves();
-    let (board, eval) = find_best_in(&boards, board.is_team1())?;
-    Some((board.clone(), eval))
-}
-
 pub fn find_best_in(boards: &[Board], is_team1: bool) -> Option<(&Board, i16)> {
     if boards.is_empty() {
         return None;

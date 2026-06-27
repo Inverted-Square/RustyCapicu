@@ -4,10 +4,42 @@ use crate::solver::find_best_in;
 use std::fmt::{Display, Formatter};
 use BoardInitialSettings::*;
 use FirstDominoChoice::*;
+use Turn::*;
+
+const DOMINOES: [(u8, u8); 28] = [
+    (0, 0),
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (0, 4),
+    (0, 5),
+    (0, 6),
+    (1, 1),
+    (1, 2),
+    (1, 3),
+    (1, 4),
+    (1, 5),
+    (1, 6),
+    (2, 2),
+    (2, 3),
+    (2, 4),
+    (2, 5),
+    (2, 6),
+    (3, 3),
+    (3, 4),
+    (3, 5),
+    (3, 6),
+    (4, 4),
+    (4, 5),
+    (4, 6),
+    (5, 5),
+    (5, 6),
+    (6, 6),
+];
 
 #[derive(Clone)]
 pub struct BoardBuilder {
-    dominoes: [[u8; 2]; 28],
+    dominoes: [(u8, u8); 28],
     settings: BoardInitialSettings,
 }
 
@@ -23,7 +55,7 @@ enum FirstDominoChoice {
     GivenIdx(Option<usize>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Turn {
     Player1,
     Player2,
@@ -31,39 +63,22 @@ pub enum Turn {
     Player4,
 }
 
+impl Turn {
+    pub fn safe_from(value: usize) -> Option<Turn> {
+        match value {
+            0 => Some(Player1),
+            1 => Some(Player2),
+            2 => Some(Player3),
+            3 => Some(Player4),
+            _ => None,
+        }
+    }
+}
+
 impl BoardBuilder {
     pub fn new() -> Self {
         use rand::{rng, seq::SliceRandom};
-        let mut dominoes: [[u8; 2]; 28] = [
-            [0, 0],
-            [0, 1],
-            [0, 2],
-            [0, 3],
-            [0, 4],
-            [0, 5],
-            [0, 6],
-            [1, 1],
-            [1, 2],
-            [1, 3],
-            [1, 4],
-            [1, 5],
-            [1, 6],
-            [2, 2],
-            [2, 3],
-            [2, 4],
-            [2, 5],
-            [2, 6],
-            [3, 3],
-            [3, 4],
-            [3, 5],
-            [3, 6],
-            [4, 4],
-            [4, 5],
-            [4, 6],
-            [5, 5],
-            [5, 6],
-            [6, 6],
-        ];
+        let mut dominoes = DOMINOES;
         dominoes.shuffle(&mut rng());
 
         Self {
@@ -88,7 +103,7 @@ impl BoardBuilder {
 
         let is_team1 = turn.is_multiple_of(2);
         let (board, eval) = find_best_in(&boards, is_team1).unwrap();
-        print!("\nChosen board's eval: {eval}");
+        println!("\nChosen board's eval: {eval}");
         board.clone()
     }
 
@@ -108,7 +123,7 @@ impl BoardBuilder {
     fn build_helper(self) -> Board {
         let mut board = Board::new();
 
-        for (idx, &[num1, num2]) in self.dominoes.iter().enumerate() {
+        for (idx, &(num1, num2)) in self.dominoes.iter().enumerate() {
             if Self::place_first(&self.settings, idx, num1, num2) {
                 board.train_ends = [num1, num2];
                 board.turn = idx / 7;
@@ -174,12 +189,20 @@ impl Board {
         self.pip_totals[player] += num1 + num2;
     }
 
+    pub fn turn(&self) -> usize {
+        self.turn
+    }
+
     pub fn eval(&self) -> i16 {
         self.eval
     }
 
     pub fn last_played_domino(&self) -> [u8; 2] {
         self.last_played_domino
+    }
+
+    pub fn hand_empty(&self) -> bool {
+        self.hands[self.turn].iter().all(|row| row.is_empty())
     }
 
     pub fn is_team1(&self) -> bool {
@@ -262,43 +285,80 @@ impl Board {
         false
     }
 
-    fn hands_to_string(&self) -> String {
-        let mut board_string = String::from("");
+    pub fn skipped_players(prev_turn: usize, curr_turn: usize) -> Vec<usize> {
+        let mut players = Vec::with_capacity(4);
 
-        for (player, hand) in self.hands.iter().enumerate() {
-            board_string.push_str(&format!("\nPlayer {}'s hand:   ", player + 1));
-            for (num1, row) in hand.iter().enumerate() {
-                board_string.push_str(&Self::dominoes_to_string(num1 as u8, row));
-            }
+        let mut temp_turn = (prev_turn + 1) % 4;
+        while temp_turn != curr_turn {
+            players.push(temp_turn);
+            temp_turn = (temp_turn + 1) % 4;
         }
 
-        board_string
+        players
     }
 
-    fn dominoes_to_string(num1: u8, row: &[u8]) -> String {
-        let mut dominoes_string = String::from("");
+    fn display_turn(&self) -> String {
+        let mut turn_string = format!("Player {}'s turn\n\nPlaced dominoes:\n", self.turn + 1);
 
-        for &num2 in row {
-            if num1 <= num2 {
-                dominoes_string.push_str(&format!("|| {num1} | {num2} ||   "));
-            }
+        for (num1, num2) in self.dominoes_placed() {
+            turn_string.push_str(&format!("|| {num1} | {num2} ||   "));
         }
 
-        dominoes_string
+        turn_string.push_str(&format!(
+            "\n\nTrain ends: {} & {}\n\n",
+            self.train_ends[0], self.train_ends[1]
+        ));
+
+        turn_string.push_str(&format!("Player {}'s hand:\n", self.turn + 1));
+        for (num1, row) in self.hands[self.turn()].iter().enumerate() {
+            Self::dominoes_display(num1 as u8, row, &mut turn_string);
+        }
+
+        turn_string.push('\n');
+
+        turn_string
+    }
+
+    fn dominoes_placed(&self) -> Vec<(u8, u8)> {
+        let mut placed: Vec<(u8, u8)> = DOMINOES.into();
+        for hand in self.hands.iter() {
+            Self::check_hand(hand, &mut placed);
+        }
+
+        placed
+    }
+
+    fn check_hand(hand: &[Vec<u8>], placed: &mut Vec<(u8, u8)>) {
+        for (num1, row) in hand.iter().enumerate() {
+            let num1 = num1 as u8;
+            for &num2 in row {
+                Self::remove_domino(num1, num2, placed);
+            }
+        }
+    }
+
+    fn remove_domino(num1: u8, num2: u8, placed: &mut Vec<(u8, u8)>) {
+        if num1 <= num2 {
+            let idx = placed
+                .iter()
+                .position(|&domino| domino == (num1, num2))
+                .unwrap();
+            placed.swap_remove(idx);
+        }
+    }
+
+    fn dominoes_display(num1: u8, row: &[u8], turn_string: &mut String) {
+        for &num2 in row {
+            if num1 <= num2 {
+                turn_string.push_str(&format!("|| {num1} | {num2} ||   "));
+            }
+        }
     }
 }
 
 impl Display for Board {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\nPip totals: {:?}\nTrain ends: {:?}\nTurn: {:?}\nEval: {}\n",
-            self.hands_to_string(),
-            self.pip_totals,
-            self.train_ends,
-            self.turn,
-            self.eval,
-        )
+        write!(f, "{}", self.display_turn())
     }
 }
 
@@ -327,6 +387,7 @@ mod tests {
         expected_board.train_ends = [6, 2];
         expected_board.turn = 2;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
+        expected_board.last_played_domino = [2, 6];
 
         assert_eq!(boards[0], expected_board);
     }
@@ -376,9 +437,11 @@ mod tests {
         expected_board1.train_ends = [1, 1];
         expected_board1.turn = 0;
         expected_board1.eval = (expected_board1.pip_totals.iter().sum::<u8>() + 25) as i16;
+        expected_board1.last_played_domino = [3, 1];
 
         let mut expected_board2 = expected_board1.clone();
         expected_board2.train_ends = [3, 3];
+        expected_board2.last_played_domino = [1, 3];
 
         assert_eq!(boards, [expected_board1, expected_board2]);
     }
@@ -411,6 +474,7 @@ mod tests {
         expected_board.add_domino_to(3, 1, 2);
         expected_board.train_ends = [1, 0];
         expected_board.turn = 2;
+        expected_board.last_played_domino = [6, 0];
 
         assert_eq!(boards[0], expected_board);
     }
@@ -436,6 +500,7 @@ mod tests {
         expected_board.train_ends = [3, 4];
         expected_board.turn = 0;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
+        expected_board.last_played_domino = [4, 3];
 
         assert_eq!(boards[0], expected_board);
     }
@@ -461,6 +526,7 @@ mod tests {
         expected_board.train_ends = [3, 4];
         expected_board.turn = 2;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
+        expected_board.last_played_domino = [4, 3];
 
         assert_eq!(boards[0], expected_board);
     }
@@ -486,6 +552,7 @@ mod tests {
         expected_board.train_ends = [3, 4];
         expected_board.turn = 1;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
+        expected_board.last_played_domino = [4, 3];
 
         assert_eq!(boards[0], expected_board);
     }
@@ -511,6 +578,7 @@ mod tests {
         expected_board.train_ends = [3, 4];
         expected_board.turn = 3;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
+        expected_board.last_played_domino = [4, 3];
 
         assert_eq!(boards[0], expected_board);
     }
