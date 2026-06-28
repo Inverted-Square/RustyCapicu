@@ -233,7 +233,7 @@ impl Board {
             let mut new_board = self.clone();
             new_board.play_domino(self.turn, train_end, num2_idx, train_idx);
             new_board.evaluate(self.turn, train_end, num2);
-            new_boards.push(new_board);
+            Self::insert_board(new_boards, new_board);
         }
     }
 
@@ -265,6 +265,7 @@ impl Board {
         }
 
         if self.set_next_turn() {
+            // TODO: calculate a heuristic eval and set self.eval to it
             return;
         }
 
@@ -289,6 +290,15 @@ impl Board {
         }
 
         false
+    }
+
+    fn insert_board(new_boards: &mut Vec<Board>, new_board: Board) {
+        new_boards.push(new_board);
+        for idx in (1..new_boards.len()).rev() {
+            if new_boards[idx].eval.abs() > new_boards[idx - 1].eval.abs() {
+                new_boards.swap(idx, idx - 1);
+            }
+        }
     }
 
     pub fn skipped_players(prev_turn: usize, curr_turn: usize) -> Vec<usize> {
