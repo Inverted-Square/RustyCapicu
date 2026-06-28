@@ -1,5 +1,7 @@
-use crate::board::Board;
+use crate::board::Turn::Player1;
+use crate::board::{Board, BoardBuilder};
 use std::cmp::{max, min};
+use std::time::{Duration, Instant};
 
 pub fn find_best_in(boards: &[Board], is_team1: bool) -> Option<(&Board, i16)> {
     if boards.is_empty() {
@@ -51,4 +53,19 @@ fn minimax(position: &Board, mut alpha: i16, mut beta: i16) -> i16 {
 
         min_eval
     }
+}
+
+pub fn bench_minimax() {
+    let num_bench_tests = 10;
+    let times = (1..=num_bench_tests).map(single_bench);
+    println!("Average - {:?}", times.sum::<Duration>() / num_bench_tests);
+}
+
+fn single_bench(bench_num: u32) -> Duration {
+    let positions = BoardBuilder::new().build_all(Player1);
+    let start = Instant::now();
+    let (_, eval) = find_best_in(&positions, true).unwrap();
+    let duration = start.elapsed();
+    println!("{bench_num}. Eval: {eval} - Search time: {duration:?}");
+    duration
 }

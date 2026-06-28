@@ -96,15 +96,14 @@ impl BoardBuilder {
         self
     }
 
-    fn build_best(self, turn: usize) -> Board {
-        let boards = (0..7)
-            .map(|domino_idx| self.clone().set_given_idx(turn, domino_idx).build_helper())
-            .collect::<Vec<_>>();
+    pub fn build_all(self, turn: Turn) -> Vec<Board> {
+        self.build_all_helper(turn as usize)
+    }
 
-        let is_team1 = turn.is_multiple_of(2);
-        let (board, eval) = find_best_in(&boards, is_team1).unwrap();
-        println!("\nChosen board's eval: {eval}");
-        board.clone()
+    fn build_all_helper(self, turn: usize) -> Vec<Board> {
+        (0..7)
+            .map(|domino_idx| self.clone().set_given_idx(turn, domino_idx).build_helper())
+            .collect()
     }
 
     fn set_given_idx(mut self, turn: usize, domino_idx: usize) -> Self {
@@ -118,6 +117,13 @@ impl BoardBuilder {
         } else {
             self.build_helper()
         }
+    }
+
+    fn build_best(self, turn: usize) -> Board {
+        let boards = self.build_all_helper(turn);
+        let is_team1 = turn.is_multiple_of(2);
+        let (board, eval) = find_best_in(&boards, is_team1).unwrap();
+        board.clone()
     }
 
     fn build_helper(self) -> Board {
