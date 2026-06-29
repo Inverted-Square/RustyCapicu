@@ -1,6 +1,6 @@
 use crate::game::PlayerType;
 use crate::game::PlayerType::*;
-use crate::solver::find_best_in;
+use crate::solver::select_best;
 use std::fmt::{Display, Formatter};
 use BoardInitialSettings::*;
 use FirstDominoChoice::*;
@@ -101,9 +101,13 @@ impl BoardBuilder {
     }
 
     fn build_all_helper(self, turn: usize) -> Vec<Board> {
-        (0..7)
-            .map(|domino_idx| self.clone().set_given_idx(turn, domino_idx).build_helper())
-            .collect()
+        let mut boards = Vec::with_capacity(7);
+        for domino_idx in 0..7 {
+            let board = self.clone().set_given_idx(turn, domino_idx).build_helper();
+            Board::insert_board(&mut boards, board);
+        }
+
+        boards
     }
 
     fn set_given_idx(mut self, turn: usize, domino_idx: usize) -> Self {
@@ -122,7 +126,7 @@ impl BoardBuilder {
     fn build_best(self, turn: usize) -> Board {
         let boards = self.build_all_helper(turn);
         let is_team1 = turn.is_multiple_of(2);
-        let (board, eval) = find_best_in(&boards, is_team1).unwrap();
+        let (board, _) = select_best(&boards, is_team1).unwrap();
         board.clone()
     }
 
@@ -147,6 +151,7 @@ impl BoardBuilder {
             )
         }
 
+        board.calculate_heuristic_eval();
         let _ = board.set_next_turn();
 
         board
@@ -172,6 +177,7 @@ pub struct Board {
     turn: usize,
     eval: i16,
     last_played_domino: [u8; 2],
+    heuristic_eval: f64,
 }
 
 impl Board {
@@ -183,6 +189,7 @@ impl Board {
             turn: 0,
             eval: 0,
             last_played_domino: [u8::MAX; 2],
+            heuristic_eval: 0.0,
         }
     }
 
@@ -232,6 +239,7 @@ impl Board {
         for (num2_idx, &num2) in self.hands[self.turn][train_end as usize].iter().enumerate() {
             let mut new_board = self.clone();
             new_board.play_domino(self.turn, train_end, num2_idx, train_idx);
+            new_board.calculate_heuristic_eval();
             new_board.evaluate(self.turn, train_end, num2);
             Self::insert_board(new_boards, new_board);
         }
@@ -253,6 +261,33 @@ impl Board {
         self.last_played_domino = [num1, num2];
     }
 
+    fn calculate_heuristic_eval(&mut self) {
+        self.heuristic_eval = 0.0;
+
+        let mut curr_turn = self.turn;
+        let sign = if self.is_team1() { 1.0 } else { -1.0 };
+        for (idx, &weight) in [0.05, 0.7, 0.2, 0.05].iter().enumerate() {
+            self.heuristic_eval += if idx.is_multiple_of(2) {
+                sign * weight * self.playable_count(curr_turn) as f64 / 7.0
+            } else {
+                sign * weight * (7 - self.playable_count(curr_turn)) as f64 / 7.0
+            };
+
+            curr_turn = (curr_turn + 1) % 4;
+        }
+
+        // not sure if this is too useful
+        for (idx, &pip_total) in self.pip_totals.iter().enumerate() {
+            let sign = if idx.is_multiple_of(2) { 1.0 } else { -1.0 };
+            self.heuristic_eval += 0.5 * sign * (69 - pip_total) as f64 / 69.0 / 4.0; // 69 is the largest pip total possible for a player (nice)
+        }
+    }
+
+    fn playable_count(&self, player: usize) -> usize {
+        let hand = &self.hands[player];
+        hand[self.train_ends[0] as usize].len() + hand[self.train_ends[1] as usize].len()
+    }
+
     fn evaluate(&mut self, player: usize, num1: u8, num2: u8) {
         if self.pip_totals[player] == 0 && self.hands[player][0].is_empty() {
             self.eval = self.pip_totals.iter().sum::<u8>() as i16;
@@ -261,11 +296,11 @@ impl Board {
                 self.eval *= -1;
             }
 
+            self.heuristic_eval = self.eval as f64;
             return;
         }
 
         if self.set_next_turn() {
-            // TODO: calculate a heuristic eval and set self.eval to it
             return;
         }
 
@@ -277,6 +312,8 @@ impl Board {
         if curr_wins && curr_team2 || !curr_wins && !curr_team2 {
             self.eval *= -1;
         }
+
+        self.heuristic_eval = self.eval as f64;
     }
 
     fn set_next_turn(&mut self) -> bool {
@@ -295,8 +332,10 @@ impl Board {
     fn insert_board(new_boards: &mut Vec<Board>, new_board: Board) {
         new_boards.push(new_board);
         for idx in (1..new_boards.len()).rev() {
-            if new_boards[idx].eval.abs() > new_boards[idx - 1].eval.abs() {
+            if new_boards[idx].heuristic_eval.abs() > new_boards[idx - 1].heuristic_eval.abs() {
                 new_boards.swap(idx, idx - 1);
+            } else {
+                return;
             }
         }
     }
@@ -404,6 +443,7 @@ mod tests {
         expected_board.turn = 2;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
         expected_board.last_played_domino = [2, 6];
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -429,6 +469,7 @@ mod tests {
         expected_board.train_ends = [3, 5];
         expected_board.turn = 1;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -454,6 +495,7 @@ mod tests {
         expected_board1.turn = 0;
         expected_board1.eval = (expected_board1.pip_totals.iter().sum::<u8>() + 25) as i16;
         expected_board1.last_played_domino = [3, 1];
+        expected_board1.heuristic_eval = expected_board1.eval as f64;
 
         let mut expected_board2 = expected_board1.clone();
         expected_board2.train_ends = [3, 3];
@@ -489,6 +531,8 @@ mod tests {
         expected_board.add_domino_to(3, 0, 3);
         expected_board.add_domino_to(3, 1, 2);
         expected_board.train_ends = [1, 0];
+        expected_board.turn = 1;
+        expected_board.calculate_heuristic_eval();
         expected_board.turn = 2;
         expected_board.last_played_domino = [6, 0];
 
@@ -517,6 +561,7 @@ mod tests {
         expected_board.turn = 0;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
         expected_board.last_played_domino = [4, 3];
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -543,6 +588,7 @@ mod tests {
         expected_board.turn = 2;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
         expected_board.last_played_domino = [4, 3];
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -569,6 +615,7 @@ mod tests {
         expected_board.turn = 1;
         expected_board.eval = -(expected_board.pip_totals.iter().sum::<u8>() as i16);
         expected_board.last_played_domino = [4, 3];
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }
@@ -595,6 +642,7 @@ mod tests {
         expected_board.turn = 3;
         expected_board.eval = expected_board.pip_totals.iter().sum::<u8>() as i16;
         expected_board.last_played_domino = [4, 3];
+        expected_board.heuristic_eval = expected_board.eval as f64;
 
         assert_eq!(boards[0], expected_board);
     }

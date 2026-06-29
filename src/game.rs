@@ -89,7 +89,7 @@ impl Game {
             self.play_round();
             let turn = self.handle_result();
 
-            if self.team_scores[0] < self.goal && self.team_scores[1] < self.goal {
+            if self.team_scores[0] >= self.goal || self.team_scores[1] >= self.goal {
                 break;
             }
 
@@ -123,7 +123,7 @@ impl Game {
                     "Ask the player what domino they want to play (their options will be based on \
                     the last_placed field in each board in boards)."
                 ),
-                UnfairBot => find_best_in(&boards, self.board.is_team1()).unwrap(),
+                UnfairBot => select_best(&boards, self.board.is_team1()).unwrap(),
             };
 
             let prev_turn = self.board.turn();

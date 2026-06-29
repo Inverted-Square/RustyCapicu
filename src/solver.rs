@@ -3,18 +3,36 @@ use crate::board::{Board, BoardBuilder};
 use std::cmp::{max, min};
 use std::time::{Duration, Instant};
 
-pub fn find_best_in(boards: &[Board], is_team1: bool) -> Option<(&Board, i16)> {
+pub fn select_best(boards: &[Board], is_team1: bool) -> Option<(&Board, i16)> {
     if boards.is_empty() {
         return None;
     }
 
-    let idx_evals = boards.iter().map(best_final_eval).enumerate();
+    let mut alpha = i16::MIN;
+    let mut beta = i16::MAX;
+    let mut best_eval = if is_team1 { i16::MIN } else { i16::MAX };
+    let mut best_idx = 0;
+    for (idx, board) in boards.iter().enumerate() {
+        let eval = minimax(board, alpha, beta);
 
-    let (best_idx, best_eval) = if is_team1 {
-        idx_evals.max_by_key(|&(_, eval)| eval)?
-    } else {
-        idx_evals.min_by_key(|&(_, eval)| eval)?
-    };
+        if is_team1 {
+            if eval > best_eval {
+                best_idx = idx;
+            }
+            best_eval = max(best_eval, eval);
+            alpha = max(alpha, eval);
+        } else {
+            if eval < best_eval {
+                best_idx = idx;
+            }
+            best_eval = min(best_eval, eval);
+            beta = min(beta, eval);
+        }
+
+        if beta <= alpha {
+            break;
+        }
+    }
 
     Some((&boards[best_idx], best_eval))
 }
@@ -28,35 +46,29 @@ fn minimax(position: &Board, mut alpha: i16, mut beta: i16) -> i16 {
         return position.eval();
     }
 
-    if position.is_team1() {
-        let mut max_eval = i16::MIN;
-        for child in position.get_all_moves() {
-            let eval = minimax(&child, alpha, beta);
-            max_eval = max(max_eval, eval);
+    let is_team1 = position.is_team1();
+    let mut best_eval = if is_team1 { i16::MIN } else { i16::MAX };
+    for child in position.get_all_moves() {
+        let eval = minimax(&child, alpha, beta);
+
+        if is_team1 {
+            best_eval = max(best_eval, eval);
             alpha = max(alpha, eval);
-            if beta <= alpha {
-                break;
-            }
-        }
-
-        max_eval
-    } else {
-        let mut min_eval = i16::MAX;
-        for child in position.get_all_moves() {
-            let eval = minimax(&child, alpha, beta);
-            min_eval = min(min_eval, eval);
+        } else {
+            best_eval = min(best_eval, eval);
             beta = min(beta, eval);
-            if beta <= alpha {
-                break;
-            }
         }
 
-        min_eval
+        if beta <= alpha {
+            break;
+        }
     }
+
+    best_eval
 }
 
 pub fn bench_minimax() {
-    let num_bench_tests = 10;
+    let num_bench_tests = 1000;
     let times = (1..=num_bench_tests).map(single_bench);
     println!("Average - {:?}", times.sum::<Duration>() / num_bench_tests);
 }
@@ -64,7 +76,7 @@ pub fn bench_minimax() {
 fn single_bench(bench_num: u32) -> Duration {
     let positions = BoardBuilder::new().build_all(Player1);
     let start = Instant::now();
-    let (_, eval) = find_best_in(&positions, true).unwrap();
+    let (_, eval) = select_best(&positions, true).unwrap();
     let duration = start.elapsed();
     println!("{bench_num}. Eval: {eval} - Search time: {duration:?}");
     duration
